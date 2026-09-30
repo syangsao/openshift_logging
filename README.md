@@ -4,39 +4,43 @@ This repo documents the step-by-step process for installing and configuring Red 
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  OpenShift Cluster                                              │
-│                                                                 │
-│  ┌──────────────┐    ┌──────────────────────────────────────┐   │
-│  │  Log Sources │    │         openshift-logging ns          │   │
-│  │  (pods,      │───▶│  ┌─────────────┐    ┌────────────┐  │   │
-│  │   infra,     │    │  │ ClusterLog  │───▶│ LokiStack  │  │   │
-│  │   audit)     │    │  │ Forwarder   │    │ (1x.small) │  │   │
-│  └──────────────┘    │  │ (Vector)    │    └─────┬──────┘  │   │
-│                       │  └─────────────┘          │         │   │
-│                       │                           ▼         │   │
-│                       │                    ┌────────────┐   │   │
-│                       │                    │ S3 Secret  │   │   │
-│                       │                    │(lokistack- │   │   │
-│                       │                    │ s3)        │   │   │
-│                       │                    └─────┬──────┘   │   │
-│                       └──────────────────────────┼──────────┘   │
-│                                                  │              │
-│  ┌───────────────────────────────────────────────┼──────────┐  │
-│  │            openshift-storage ns (ODF)         ▼          │  │
-│  │  ┌──────────────┐    ┌──────────────┐  ┌────────────┐  │  │
-│  │  │ NooBaa Core  │◀───│ BackingStore │  │ Object     │  │  │
-│  │  │ (S3 endpoint)│    │ (PV Pool,    │  │ Bucket     │  │  │
-│  │  │              │    │  local disk) │  │ Claim      │  │  │
-│  │  └──────────────┘    └──────────────┘  │(loki-bucket│  │  │
-│  │                                         │ -odf)      │  │  │
-│  │  ┌──────────────┐                       └────────────┘  │  │
-│  │  │ CNPG Postgres│ (NooBaa metadata DB, local PV)        │  │
-│  │  │ Cluster      │                                       │  │
-│  │  └──────────────┘                                       │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph cluster["OpenShift Cluster"]
+        direction TB
+
+        subgraph src["Log Sources"]
+            direction TB
+            APP["Application<br/>(pod logs)"]
+            INFRA["Infrastructure<br/>(kube, node)"]
+            AUDIT["Audit<br/>(API, OVN)"]
+        end
+
+        subgraph logns["openshift-logging namespace"]
+            direction TB
+            CLF["ClusterLogForwarder<br/>(Vector collector)<br/>DaemonSet 'instance'"]
+            LS["LokiStack<br/>size: 1x.small<br/>distributor / ingester /<br/>querier / compactor /<br/>index-gateway / gateway"]
+            S3SECRET[("Secret lokistack-s3<br/>(S3 credentials)")]
+        end
+
+        subgraph odfns["openshift-storage namespace (ODF)"]
+            direction TB
+            NOOBAA["NooBaa Core<br/>S3 endpoint<br/>https://s3.openshift-storage.svc:443"]
+            BS["BackingStore<br/>(PV pool, local PV 50Gi)"]
+            OBC[("ObjectBucketClaim<br/>loki-bucket-odf<br/>(~100GiB bucket)")]
+            CNPG[("CNPG Postgres Cluster<br/>(NooBaa metadata DB)<br/>local PVs on control01/02")]
+        end
+    end
+
+    APP --> CLF
+    INFRA --> CLF
+    AUDIT --> CLF
+    CLF -- "gRPC push<br/>(TLS, SA token)" --> LS
+    S3SECRET -.->|"referenced by"| LS
+    LS -- "S3 API<br/>(chunks + indices)" --> NOOBAA
+    OBC -- "provisions bucket in" --> NOOBAA
+    BS -- "backing storage for" --> NOOBAA
+    CNPG -- "metadata store for" --> NOOBAA
 ```
 
 ## Prerequisites
