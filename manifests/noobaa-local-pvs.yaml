@@ -1,0 +1,71 @@
+# Local PVs for NooBaa DB (primary + replica) and BackingStore
+# Adjust node names and paths to match your environment.
+# Create the directories on each node first:
+#   oc debug --as-root -q node/<node> -- chroot /host sh -c 'mkdir -p /var/lib/noobaa-db'
+#   oc debug --as-root -q node/<node> -- chroot /host sh -c 'mkdir -p /var/lib/noobaa-backing-store'
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: noobaa-db-local-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOncePod
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-fast
+  local:
+    path: /var/lib/noobaa-db
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - control01.syangsao.net
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: noobaa-db-local-pv-2
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOncePod
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-fast
+  local:
+    path: /var/lib/noobaa-db
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - control02.syangsao.net
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: noobaa-backing-store-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-fast
+  local:
+    path: /var/lib/noobaa-backing-store
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - control01.syangsao.net
