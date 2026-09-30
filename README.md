@@ -9,6 +9,8 @@ flowchart LR
     subgraph cluster["OpenShift Cluster"]
         direction TB
 
+        CONSOLE["OpenShift Web Console<br/>Observe → Logs<br/>(Logging UIPlugin)"]
+
         subgraph src["Log Sources"]
             direction TB
             APP["Application<br/>(pod logs)"]
@@ -41,6 +43,7 @@ flowchart LR
     OBC -- "provisions bucket in" --> NOOBAA
     BS -- "backing storage for" --> NOOBAA
     CNPG -- "metadata store for" --> NOOBAA
+    CONSOLE -- "query logs<br/>(via Observatorium API)" --> LS
 ```
 
 ## Prerequisites
@@ -475,6 +478,46 @@ oc logs -n openshift-logging $(oc get pods -n openshift-logging -o name | grep i
 oc logs -n openshift-logging lokistack-ingester-0 --tail=20
 ```
 
+### Step 13: Enable the Logs Tab in the Web Console (UI Plugin)
+
+The Cluster Observability Operator provides a **Logging UI plugin** that surfaces logs in the OpenShift web console under **Observe → Logs**. Without it, you can only query logs via the CLI or Loki API directly.
+
+Create a `UIPlugin` CR. The `lokiStack.name` must match your LokiStack instance name:
+
+```bash
+cat <<'EOF' | oc apply -f -
+apiVersion: observability.openshift.io/v1alpha1
+kind: UIPlugin
+metadata:
+  name: logging
+spec:
+  type: Logging
+  logging:
+    lokiStack:
+      name: lokistack
+    logsLimit: 50
+    timeout: 30s
+    schema: select
+EOF
+```
+
+`spec.logging.schema` — one of `otel`, `viaq`, or `select`. The default is `viaq`. Use `select` to choose the mode in the UI when running a query. Known issues: the `schema` feature requires OCP 4.15+, and non-admin users cannot query with `otel` on logging versions 5.8–6.2.
+
+Verify the plugin is reconciled and registered with the console:
+
+```bash
+# UIPlugin should show Reconciled=True, Available=True, Degraded=False
+oc get uiplugin logging -o json | \
+  python3 -c "import json,sys; d=json.load(sys.stdin); [print(f'{c[\"type\"]}: {c[\"status\"]} - {c.get(\"message\",\"\")}') for c in d['status'].get('conditions',[])]"
+
+# The console plugin should be registered and added to the Console spec
+oc get consoleplugins | grep logging
+oc get consoles.operator.openshift.io cluster -o jsonpath='{.spec.plugins}{"\n"}'
+```
+
+Refresh the web console and navigate to **Observe → Logs**. You can also view aggregated logs for individual pods on the pod's detail page under the **Aggregated Logs** tab.
+
+
 ## Troubleshooting
 
 ### NooBaa DB initdb Fails with "invalid permissions"
@@ -526,6 +569,9 @@ For this setup, `1x.small` with an 8Gi collector memory override works well for 
 ## Cleanup / Teardown
 
 ```bash
+# Delete the logging UI plugin (removes the Observe → Logs tab)
+oc delete uiplugin logging
+
 # Delete logging resources
 oc delete clusterlogforwarder instance -n openshift-logging
 oc delete lokistack lokistack -n openshift-logging
